@@ -1,5 +1,8 @@
 tweepy==4.15.0
 google-generativeai==0.8.3
+requests==2.32.3
+boto3==1.35.0
+
+# 로컬 실행 전용 (Lambda 환경 불필요)
 python-dotenv==1.0.1
 schedule==1.2.2
-requests==2.32.3

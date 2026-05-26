@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  Twitter 클리핑 서버리스 배치 - SK가스 대외정책 모니터링
+
+# ── 파라미터 ──────────────────────────────────────────────────────────────────
+Parameters:
+  SecretName:
+    Type: String
+    Default: twitter-clipping/secrets
+    Description: AWS Secrets Manager 시크릿 이름
+
+  AccountsParam:
+    Type: String
+    Default: /twitter-clipping/accounts
+    Description: SSM Parameter Store - 수집 대상 계정 JSON
+
+  StateTableName:
+    Type: String
+    Default: twitter-clipping-state
+    Description: DynamoDB 상태 테이블 이름
+
+  GeminiModel:
+    Type: String
+    Default: gemini-2.5-flash
+
+  MaxTweetsPerRun:
+    Type: Number
+    Default: 20
+    Description: 계정당 최대 처리 트윗 수 (Lambda 타임아웃 방지)
+
+  ScheduleExpression:
+    Type: String
+    Default: rate(15 minutes)
+    Description: EventBridge 실행 주기
+
+# ── 리소스 ──────────────────────────────────────────────────────────────────
+Resources:
+
+  # Lambda 함수
+  TwitterClippingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: twitter-clipping
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.12
+      Timeout: 300        # 5분 (Gemini rate limit 대기 포함)
+      MemorySize: 256
+      Environment:
+        Variables:
+          SECRET_NAME:        !Ref SecretName
+          ACCOUNTS_PARAM:     !Ref AccountsParam
+          STATE_TABLE:        !Ref StateTableName
+          AWS_REGION_NAME:    !Ref AWS::Region
+          GEMINI_MODEL:       !Ref GeminiModel
+          MAX_TWEETS_PER_RUN: !Ref MaxTweetsPerRun
+      Policies:
+        # Secrets Manager 읽기
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${SecretName}*"
+        # SSM Parameter Store 읽기
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${AccountsParam}"
+        # DynamoDB CRUD
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StateTableName
+        # CloudWatch Logs (자동 연동)
+        - CloudWatchLogsFullAccess
+      Events:
+        ScheduleEvent:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref ScheduleExpression
+            Name: twitter-clipping-schedule
+            Description: 15분마다 트윗 수집 및 필터링
+            Enabled: true
+
+  # DynamoDB 상태 테이블
+  StateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref StateTableName
+      BillingMode: PAY_PER_REQUEST   # 서버리스 과금 (사용량 기반)
+      AttributeDefinitions:
+        - AttributeName: username
+          AttributeType: S
+      KeySchema:
+        - AttributeName: username
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+# ── 출력 ────────────────────────────────────────────────────────────────────
+Outputs:
+  LambdaFunctionArn:
+    Description: Lambda 함수 ARN
+    Value: !GetAtt TwitterClippingFunction.Arn
+
+  StateTableName:
+    Description: DynamoDB 테이블 이름
+    Value: !Ref StateTable

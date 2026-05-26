@@ -1,0 +1,20 @@
+repos:
+  # AWS 자격증명·API 키 등 시크릿 유출 방지
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: '(\.env\.example|accounts\.json)'
+
+  # 기본 파일 검사
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-added-large-files   # 대용량 파일 커밋 방지
+        args: ['--maxkb=500']
+      - id: check-merge-conflict       # 머지 충돌 마커 감지
+      - id: detect-private-key         # 개인 키 파일 감지
+      - id: check-json                 # JSON 문법 검사 (accounts.json)
+      - id: end-of-file-fixer
+      - id: trailing-whitespace

@@ -18,3 +18,19 @@ __pycache__/
 # Windows
 Thumbs.db
 desktop.ini
+
+# AWS 자격증명 (절대 커밋 금지)
+.aws/
+credentials
+*.pem
+*.key
+
+# detect-secrets
+.secrets.baseline
+
+# SAM 빌드 산출물
+.aws-sam/
+samconfig.toml
+
+# Lambda 배포 패키지
+*.zip

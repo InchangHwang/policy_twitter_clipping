@@ -1,0 +1,16 @@
+[
+  {
+    "username": "Jaemyung_Lee",
+    "label": "이재명 대통령",
+    "telegram_header": "[이재명 대통령 트위터]",
+    "filter_enabled": true,
+    "active": true
+  },
+  {
+    "username": "no1nowon",
+    "label": "기후부 장관",
+    "telegram_header": "[기후부 장관 트위터]",
+    "filter_enabled": true,
+    "active": true
+  }
+]

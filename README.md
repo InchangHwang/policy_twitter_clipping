@@ -46,65 +46,121 @@ AWS Lambda (lambda_function.py)
 ├── telegram_sender.py     # Telegram 발송
 ├── accounts.json          # 수집 계정 목록 (민감정보 없음)
 ├── requirements.txt       # 의존성
-├── template.yaml          # SAM / CloudFormation 배포 템플릿
+├── build_lambda.bat       # ZIP 패키지 빌드 스크립트 (Windows)
 ├── .env.example           # 로컬 환경변수 양식
 ├── .gitignore
 └── .pre-commit-config.yaml  # 시크릿 유출 방지 훅
 ```
 
-## AWS 배포
+## AWS 배포 (수동 - 콘솔 ZIP 업로드)
 
-### 사전 준비
+### 1단계. Secrets Manager 시크릿 생성
 
-#### 1. Secrets Manager에 시크릿 생성
+AWS 콘솔 → Secrets Manager → **새 시크릿 저장** → 기타 유형 선택 후 아래 키/값 입력:
 
-```bash
-aws secretsmanager create-secret \
-  --name "twitter-clipping/secrets" \
-  --region ap-northeast-2 \
-  --secret-string '{
-    "TWITTER_BEARER_TOKEN": "...",
-    "GEMINI_API_KEY": "...",
-    "TELEGRAM_BOT_TOKEN": "...",
-    "TELEGRAM_CHAT_ID": "..."
-  }'
+| 키 | 값 |
+|----|-----|
+| TWITTER_BEARER_TOKEN | Twitter API Bearer Token |
+| GEMINI_API_KEY | Google AI Studio API Key |
+| TELEGRAM_BOT_TOKEN | Telegram Bot Token |
+| TELEGRAM_CHAT_ID | Telegram Chat ID |
+
+- 시크릿 이름: `twitter-clipping/secrets`
+- 리전: `ap-northeast-2` (서울)
+
+---
+
+### 2단계. SSM Parameter Store 계정 목록 등록
+
+AWS 콘솔 → Systems Manager → Parameter Store → **파라미터 생성**
+
+- 이름: `/twitter-clipping/accounts`
+- 유형: `String`
+- 값:
+```json
+[
+  {"username":"Jaemyung_Lee","label":"이재명 대통령","telegram_header":"[이재명 대통령 트위터]","filter_enabled":true,"active":true},
+  {"username":"no1nowon","label":"기후부 장관","telegram_header":"[기후부 장관 트위터]","filter_enabled":true,"active":true}
+]
 ```
 
-#### 2. SSM Parameter Store에 계정 목록 등록
+---
+
+### 3단계. DynamoDB 테이블 생성
+
+AWS 콘솔 → DynamoDB → **테이블 생성**
+
+| 항목 | 값 |
+|------|-----|
+| 테이블 이름 | `twitter-clipping-state` |
+| 파티션 키 | `username` (문자열) |
+| 용량 모드 | 온디맨드 |
+
+---
+
+### 4단계. Lambda 함수 생성
+
+AWS 콘솔 → Lambda → **함수 생성**
+
+| 항목 | 값 |
+|------|-----|
+| 함수 이름 | `twitter-clipping` |
+| 런타임 | Python 3.12 |
+| 아키텍처 | x86_64 |
+
+---
+
+### 5단계. ZIP 패키지 빌드 및 업로드
 
 ```bash
-aws ssm put-parameter \
-  --name "/twitter-clipping/accounts" \
-  --type "String" \
-  --region ap-northeast-2 \
-  --value '[
-    {"username":"Jaemyung_Lee","label":"이재명 대통령","telegram_header":"[이재명 대통령 트위터]","filter_enabled":true,"active":true},
-    {"username":"no1nowon","label":"기후부 장관","telegram_header":"[기후부 장관 트위터]","filter_enabled":true,"active":true}
-  ]'
+# Windows: 빌드 스크립트 실행
+build_lambda.bat
 ```
 
-#### 3. SAM으로 배포
+생성된 `lambda_package.zip` 파일을 Lambda 콘솔 → **코드 소스** → **업로드** → `.zip 파일` 선택하여 업로드.
 
-```bash
-# SAM CLI 설치 (최초 1회)
-pip install aws-sam-cli
+- 핸들러 설정: `lambda_function.lambda_handler`
 
-# 빌드 & 배포
-sam build
-sam deploy --guided
-```
+---
 
-### 계정 추가 방법
+### 6단계. Lambda 환경 변수 설정
 
-SSM Parameter Store 값만 업데이트하면 Lambda 재배포 없이 적용됩니다:
+Lambda 콘솔 → **구성** → **환경 변수** → 편집:
 
-```bash
-aws ssm put-parameter \
-  --name "/twitter-clipping/accounts" \
-  --type "String" \
-  --overwrite \
-  --value '[기존 계정들 + 신규 계정 JSON]'
-```
+| 키 | 값 |
+|----|-----|
+| SECRET_NAME | `twitter-clipping/secrets` |
+| ACCOUNTS_PARAM | `/twitter-clipping/accounts` |
+| STATE_TABLE | `twitter-clipping-state` |
+| AWS_REGION | `ap-northeast-2` |
+| GEMINI_MODEL | `gemini-2.5-flash` |
+| MAX_TWEETS_PER_RUN | `20` |
+
+---
+
+### 7단계. Lambda IAM 권한 설정
+
+Lambda 콘솔 → **구성** → **권한** → 실행 역할 클릭 → IAM 역할에 아래 정책 추가:
+
+- `SecretsManagerReadWrite`
+- `AmazonSSMReadOnlyAccess`
+- `AmazonDynamoDBFullAccess`
+
+---
+
+### 8단계. EventBridge 스케줄 설정
+
+Lambda 콘솔 → **트리거 추가** → EventBridge
+
+- 새 규칙 생성
+- 규칙 이름: `twitter-clipping-schedule`
+- 일정 표현식: `rate(15 minutes)`
+
+---
+
+### 계정 추가 방법 (재배포 불필요)
+
+AWS 콘솔 → SSM Parameter Store → `/twitter-clipping/accounts` → **편집** → JSON에 계정 추가 후 저장
 
 ## 로컬 실행 (개발용)
 

@@ -23,7 +23,7 @@ except ImportError:
 
 from config import get_secrets, get_accounts, get_app_config
 from state_manager import StateManager
-from twitter_collector import get_client, resolve_user_id, fetch_new_tweets
+from twitter_collector import resolve_user_id, get_recent_tweets
 from gemini_filter import GeminiFilter
 from telegram_sender import TelegramSender
 
@@ -38,15 +38,15 @@ def lambda_handler(event: dict, context) -> dict:
     log.info("===== 클리핑 시작 =====")
 
     # 1. 설정 로드
-    cfg     = get_app_config()
-    secrets = get_secrets()
+    cfg      = get_app_config()
+    secrets  = get_secrets()
     accounts = get_accounts()
 
+    bearer_token = secrets["TWITTER_BEARER_TOKEN"]
     log.info(f"수집 대상 계정: {[a['username'] for a in accounts]}")
 
     # 2. 클라이언트 초기화
-    twitter  = get_client(secrets["TWITTER_BEARER_TOKEN"])
-    gemini   = GeminiFilter(
+    gemini = GeminiFilter(
         api_key    = secrets["GEMINI_API_KEY"],
         model_name = cfg["gemini_model"],
         rpm_limit  = cfg["gemini_rpm_limit"],
@@ -60,8 +60,8 @@ def lambda_handler(event: dict, context) -> dict:
         region     = cfg["aws_region"],
     )
 
-    # 3. 계정별 수집 · 필터 · 발송
-    total_sent = total_filtered = 0
+    # 3. 계정별 수집 · 중복 제거 · 필터 · 발송
+    total_sent = total_filtered = total_duplicate = 0
 
     for account in accounts:
         username = account["username"]
@@ -69,30 +69,36 @@ def lambda_handler(event: dict, context) -> dict:
 
         try:
             # user_id 조회 (state에 캐싱)
-            user_id = state.get_last_tweet_id(f"_uid_{username}")
+            user_id = state.get_user_id(username)
             if not user_id:
-                user_id = resolve_user_id(twitter, username)
-                state.set_last_tweet_id(f"_uid_{username}", user_id)
-                log.info(f"@{username} user_id 조회: {user_id}")
+                user_id = resolve_user_id(bearer_token, username)
+                state.set_user_id(username, user_id)
 
-            # 새 트윗 수집
-            since_id = state.get_last_tweet_id(username)
-            tweets   = fetch_new_tweets(
-                twitter,
-                user_id,
-                since_id,
-                max_results=cfg["max_tweets_per_run"],
+            # 최근 30분 트윗 수집
+            tweets = get_recent_tweets(
+                bearer_token = bearer_token,
+                user_id      = user_id,
+                minutes      = cfg.get("crawl_minutes", 30),
             )
-            log.info(f"@{username} 새 트윗 {len(tweets)}건 수집")
+            log.info(f"@{username} 수집: {len(tweets)}건")
 
             if not tweets:
                 continue
 
-            sent_count = filtered_count = 0
-            latest_id  = since_id
+            # 이미 발송된 tweet_id 로드 → 중복 제거
+            sent_ids   = state.get_sent_ids(username)
+            new_tweets = [t for t in tweets if t["id"] not in sent_ids]
+            dup_count  = len(tweets) - len(new_tweets)
 
-            for tweet in tweets:
-                # 필터링 여부 판단
+            if dup_count:
+                log.info(f"@{username} 중복 제거: {dup_count}건 스킵")
+            total_duplicate += dup_count
+
+            sent_count = filtered_count = 0
+            newly_sent_ids = []
+
+            for tweet in new_tweets:
+                # Gemini 필터링
                 if account.get("filter_enabled", True):
                     relevant, reason = gemini.check_relevance(tweet["text"])
                 else:
@@ -101,34 +107,41 @@ def lambda_handler(event: dict, context) -> dict:
                 if relevant:
                     msg = telegram.format_message(tweet, account, reason)
                     telegram.send(msg)
+                    newly_sent_ids.append(tweet["id"])
                     sent_count += 1
                     log.info(f"[발송 ✅] {tweet['id']} | {reason} | {tweet['text'][:40]}")
                 else:
                     filtered_count += 1
                     log.info(f"[필터 ❌] {tweet['id']} | {reason} | {tweet['text'][:40]}")
 
-                latest_id = tweet["id"]
+            # 발송된 ID 저장 (필터링된 것도 저장 → 재수집 시 재판단 방지)
+            all_processed_ids = [t["id"] for t in new_tweets]
+            if all_processed_ids:
+                state.add_sent_ids(username, all_processed_ids)
 
-            # 상태 저장
-            if latest_id and latest_id != since_id:
-                state.set_last_tweet_id(username, latest_id)
-
-            log.info(f"@{username} 결과: 발송 {sent_count}건 / 필터 {filtered_count}건")
+            log.info(
+                f"@{username} 결과: 발송 {sent_count}건 / "
+                f"필터 {filtered_count}건 / 중복 {dup_count}건"
+            )
             total_sent     += sent_count
             total_filtered += filtered_count
 
         except Exception as e:
             log.exception(f"@{username} 처리 중 오류: {e}")
-            continue  # 한 계정 실패해도 다음 계정 계속 처리
+            continue
 
-    log.info(f"===== 완료: 전체 발송 {total_sent}건 / 필터 {total_filtered}건 =====")
+    log.info(
+        f"===== 완료: 발송 {total_sent}건 / "
+        f"필터 {total_filtered}건 / 중복제거 {total_duplicate}건 ====="
+    )
 
     return {
         "statusCode": 200,
         "body": {
-            "total_sent":     total_sent,
-            "total_filtered": total_filtered,
-            "accounts":       [a["username"] for a in accounts],
+            "total_sent":      total_sent,
+            "total_filtered":  total_filtered,
+            "total_duplicate": total_duplicate,
+            "accounts":        [a["username"] for a in accounts],
         },
     }
 
@@ -139,7 +152,7 @@ if __name__ == "__main__":
     import schedule
     import time
 
-    cfg = get_app_config()
+    cfg      = get_app_config()
     interval = cfg["fetch_interval_minutes"]
     log.info(f"로컬 스케줄러 시작 | 주기: {interval}분")
 

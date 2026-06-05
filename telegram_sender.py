@@ -4,8 +4,21 @@ Telegram 발송 모듈
 
 import logging
 import requests
+from datetime import datetime, timezone, timedelta
 
 log = logging.getLogger(__name__)
+
+KST = timezone(timedelta(hours=9))
+
+
+def to_kst(utc_str: str) -> str:
+    """UTC 문자열 → KST 문자열 변환"""
+    try:
+        dt = datetime.fromisoformat(utc_str.replace("Z", "+00:00"))
+        kst_dt = dt.astimezone(KST)
+        return kst_dt.strftime("%Y-%m-%d %H:%M KST")
+    except Exception:
+        return utc_str  # 변환 실패 시 원본 반환
 
 
 class TelegramSender:
@@ -43,7 +56,7 @@ class TelegramSender:
         if reason:
             parts.append(f"📌 <i>{reason}</i>")
         parts += [
-            f"🕐 {tweet['created_at']}",
+            f"🕐 {to_kst(tweet['created_at'])}",
             f"🔗 <a href=\"{tweet_url}\">원문 보기</a>",
         ]
         return "\n".join(parts)

@@ -44,7 +44,6 @@ def get_recent_tweets(bearer_token: str, user_id: str, minutes: int = 30) -> lis
     params = {
         "start_time":    start_time,
         "tweet.fields":  "id,created_at,text,note_tweet",
-        "exclude":       "retweets,replies",
         "max_results":   100,
     }
     headers = {"Authorization": f"Bearer {bearer_token}"}

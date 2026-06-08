@@ -48,9 +48,12 @@ class TelegramSender:
     def format_message(self, tweet: dict, account: dict, reason: str = "") -> str:
         header = account.get("telegram_header", f"[{account['label']} 트위터]")
         tweet_url = f"https://twitter.com/{account['username']}/status/{tweet['id']}"
+
+        escaped_text = tweet["text"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        
         parts = [
             f"<b>{header}</b>\n",
-            tweet["text"],
+            escaped_text,
             "",
         ]
         if reason:

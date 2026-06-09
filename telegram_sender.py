@@ -49,11 +49,10 @@ class TelegramSender:
         header = account.get("telegram_header", f"[{account['label']} 트위터]")
         tweet_url = f"https://twitter.com/{account['username']}/status/{tweet['id']}"
 
-        escaped_text = tweet["text"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         
         parts = [
             f"<b>{header}</b>\n",
-            escaped_text,
+            tweet["text"],
             "",
         ]
         if reason:

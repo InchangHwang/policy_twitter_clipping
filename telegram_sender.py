@@ -11,12 +11,15 @@ log = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
 
 
-def to_kst(utc_str: str) -> str:
-    """UTC 문자열 → KST 문자열 변환"""
+def to_kst_korean(utc_str: str) -> str:
+    """UTC 문자열 → 한국어 날짜시간 형식 변환 (예: 2026.06.10 오후 3시)"""
     try:
         dt = datetime.fromisoformat(utc_str.replace("Z", "+00:00"))
         kst_dt = dt.astimezone(KST)
-        return kst_dt.strftime("%Y-%m-%d %H:%M KST")
+        hour = kst_dt.hour
+        ampm = "오전" if hour < 12 else "오후"
+        hour_12 = hour % 12 or 12
+        return kst_dt.strftime(f"%Y.%m.%d {ampm} {hour_12}시")
     except Exception:
         return utc_str  # 변환 실패 시 원본 반환
 
@@ -51,14 +54,8 @@ class TelegramSender:
 
         
         parts = [
-            f"<b>{header}</b>\n",
-            tweet["text"],
-            "",
-        ]
-        if reason:
-            parts.append(f"📌 <i>{reason}</i>")
-        parts += [
-            f"🕐 {to_kst(tweet['created_at'])}",
-            f"🔗 <a href=\"{tweet_url}\">원문 보기</a>",
+            f"<b>{header}</b>",
+            to_kst_korean(tweet["created_at"]),
+            f"<a href=\"{tweet_url}\">본문링크</a>",
         ]
         return "\n".join(parts)

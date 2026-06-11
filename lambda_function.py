@@ -95,7 +95,8 @@ def lambda_handler(event: dict, context) -> dict:
             total_duplicate += dup_count
 
             sent_count = filtered_count = 0
-            newly_sent_ids = []
+            sent_ids_to_save = []    # 발송 성공한 ID
+            filtered_ids_to_save = []  # 필터링된 ID (재판단 방지용)
 
             for tweet in new_tweets:
                 # Gemini 필터링
@@ -106,18 +107,22 @@ def lambda_handler(event: dict, context) -> dict:
 
                 if relevant:
                     msg = telegram.format_message(tweet, account, reason)
-                    telegram.send(msg)
-                    newly_sent_ids.append(tweet["id"])
-                    sent_count += 1
-                    log.info(f"[발송 ✅] {tweet['id']} | {reason} | {tweet['text'][:40]}")
+                    try:
+                        telegram.send(msg)
+                        sent_ids_to_save.append(tweet["id"])
+                        sent_count += 1
+                        log.info(f"[발송 ✅] {tweet['id']} | {tweet['text'][:40]}")
+                    except Exception as send_err:
+                        log.error(f"[발송 실패] {tweet['id']} | {send_err} → 다음 타임에 재시도")
                 else:
+                    filtered_ids_to_save.append(tweet["id"])
                     filtered_count += 1
                     log.info(f"[필터 ❌] {tweet['id']} | {reason} | {tweet['text'][:40]}")
 
-            # 발송된 ID 저장 (필터링된 것도 저장 → 재수집 시 재판단 방지)
-            all_processed_ids = [t["id"] for t in new_tweets]
-            if all_processed_ids:
-                state.add_sent_ids(username, all_processed_ids)
+            # 발송 성공 ID + 필터링 ID 저장 (발송 실패 ID는 저장 안 함 → 재시도)
+            ids_to_save = sent_ids_to_save + filtered_ids_to_save
+            if ids_to_save:
+                state.add_sent_ids(username, ids_to_save)
 
             log.info(
                 f"@{username} 결과: 발송 {sent_count}건 / "

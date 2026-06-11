@@ -12,5 +12,12 @@
     "telegram_header": "[기후부 장관 트위터]",
     "filter_enabled": false,
     "active": true
+  },
+  {
+    "username": "ministerofMOTIR",
+    "label": "산업부 장관",
+    "telegram_header": "[산업부 장관 트위터]",
+    "filter_enabled": false,
+    "active": true
   }
 ]

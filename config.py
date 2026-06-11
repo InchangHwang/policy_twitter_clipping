@@ -67,7 +67,7 @@ def get_accounts() -> list[dict]:
 def get_app_config() -> dict:
     return {
         "fetch_interval_minutes": int(os.environ.get("FETCH_INTERVAL_MINUTES", "15")),
-        "crawl_minutes":          int(os.environ.get("CRAWL_MINUTES", "30")),
+        "crawl_minutes":          int(os.environ.get("CRAWL_MINUTES", "120")),
         "state_table":            os.environ.get("STATE_TABLE", "twitter-clipping-state"),
         "aws_region":             os.environ.get("AWS_REGION", "ap-northeast-2"),
         "gemini_model":           os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
